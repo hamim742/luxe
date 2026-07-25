@@ -134,6 +134,37 @@ export default function AdminDashboardOverviewClient() {
   }, [dashboardData, timeframe]);
 
   const handleExport = () => {
+    if (!currentStats) {
+      toast.error("No metrics data available to export.");
+      return;
+    }
+
+    const growthLabel = timeframe === "Today" ? "vs yesterday" : timeframe === "7d" ? "vs last week" : "vs last month";
+    const headers = ["Metric", "Value", `Growth (${growthLabel})`].join(",");
+    
+    const rows = [
+      ["Total Revenue", `৳${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, `${currentStats.revenueGrowth.toFixed(1)}%`],
+      ["Total Orders", totalOrders.toLocaleString(), `${currentStats.ordersGrowth.toFixed(1)}%`],
+      ["Active Products", productsCount.toLocaleString(), `${currentStats.productsGrowth.toFixed(1)}%`],
+      ["Registered Users", usersCount.toLocaleString(), `${currentStats.usersGrowth.toFixed(1)}%`],
+      ["Daily Average Revenue", `৳${(dashboardData?.dailyAverage || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "N/A"]
+    ];
+
+    const csvContent = [
+      headers,
+      ...rows.map(row => row.map(val => `"${val.replace(/"/g, '""')}"`).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `dashboard_metrics_${timeframe}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
     toast.success("Dashboard metrics exported successfully to CSV!");
   };
 
