@@ -51,51 +51,59 @@ export default function AdminDashboardOverviewClient() {
   const API_URL = process.env.NEXT_PUBLIC_URL || "http://localhost:5001/api/v1";
 
   const [timeframe, setTimeframe] = useState<"Today" | "7d" | "30d">("30d");
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [productsCount, setProductsCount] = useState(0);
-  const [usersCount, setUsersCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [topProducts, setTopProducts] = useState<{ id: string; name: string; price: number; category: string; inventoryCount: number; image: string }[]>([]);
+  const [dashboardData, setDashboardData] = useState<{
+    timeframeStats: {
+      Today: {
+        totalRevenue: number;
+        revenueGrowth: number;
+        totalOrders: number;
+        ordersGrowth: number;
+        activeProducts: number;
+        productsGrowth: number;
+        registeredUsers: number;
+        usersGrowth: number;
+      };
+      "7d": {
+        totalRevenue: number;
+        revenueGrowth: number;
+        totalOrders: number;
+        ordersGrowth: number;
+        activeProducts: number;
+        productsGrowth: number;
+        registeredUsers: number;
+        usersGrowth: number;
+      };
+      "30d": {
+        totalRevenue: number;
+        revenueGrowth: number;
+        totalOrders: number;
+        ordersGrowth: number;
+        activeProducts: number;
+        productsGrowth: number;
+        registeredUsers: number;
+        usersGrowth: number;
+      };
+    };
+    dailyAverage: number;
+    recentOrders: Order[];
+    topProducts: { id: string; name: string; price: number; category: string; inventoryCount: number; image: string }[];
+    chartData: {
+      Today: { name: string; Revenue: number; Orders: number }[];
+      "7d": { name: string; Revenue: number; Orders: number }[];
+      "30d": { name: string; Revenue: number; Orders: number }[];
+    };
+  } | null>(null);
 
   // Fetch dashboard stats on mount
   useEffect(() => {
     const fetchDashboardStats = async () => {
       try {
         setIsLoading(true);
-        // Fetch Orders
-        const ordersRes = await fetch(`${API_URL}/orders?limit=100`);
-        const ordersJson = await ordersRes.json();
-        if (ordersJson.success && ordersJson.data) {
-          setOrders(ordersJson.data);
-        }
-
-        // Fetch Products
-        const productsRes = await fetch(`${API_URL}/products`);
-        const productsJson = await productsRes.json();
-        if (productsJson.success && productsJson.data) {
-          const allProducts = productsJson.data;
-          setProductsCount(allProducts.length);
-          // Top products = highest priced published products (proxy for high-value items)
-          const top = [...allProducts]
-            .filter((p: any) => p.status === "Published")
-            .sort((a: any, b: any) => (Number(b.price) || 0) - (Number(a.price) || 0))
-            .slice(0, 3)
-            .map((p: any) => ({
-              id: p.id,
-              name: p.name,
-              price: Number(p.price) || 0,
-              category: p.category || "General",
-              inventoryCount: p.inventoryCount || 0,
-              image: p.image || "",
-            }));
-          setTopProducts(top);
-        }
-
-        // Fetch Users
-        const usersRes = await fetch(`${API_URL}/users`);
-        const usersJson = await usersRes.json();
-        if (usersJson.success && usersJson.data) {
-          setUsersCount(usersJson.data.length);
+        const res = await fetch(`${API_URL}/orders/dashboard-stats`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          setDashboardData(json.data);
         }
       } catch (err) {
         console.error("Error loading dashboard overview stats:", err);
@@ -106,88 +114,24 @@ export default function AdminDashboardOverviewClient() {
     fetchDashboardStats();
   }, [API_URL]);
 
-  // Derived metrics calculations
-  const totalOrders = orders.length;
-  const totalRevenue = orders
-    .filter((ord) => ord.fulfillmentStatus !== "Canceled" && ord.fulfillmentStatus !== "Cancelled")
-    .reduce((sum, ord) => sum + (Number(ord.total) || 0), 0);
+  // Derived metrics matching selected timeframe
+  const currentStats = useMemo(() => {
+    if (!dashboardData?.timeframeStats) return null;
+    return dashboardData.timeframeStats[timeframe];
+  }, [dashboardData, timeframe]);
 
-  const displayOrders = orders.slice(0, 5);
+  const totalOrders = currentStats?.totalOrders || 0;
+  const totalRevenue = currentStats?.totalRevenue || 0;
+  const productsCount = currentStats?.activeProducts || 0;
+  const usersCount = currentStats?.registeredUsers || 0;
+  
+  const displayOrders = dashboardData?.recentOrders || [];
+  const topProducts = dashboardData?.topProducts || [];
 
-  // Generate days of data ending today based on selected timeframe
   const chartData = useMemo(() => {
-    const dataMap: Record<string, { revenue: number; ordersCount: number }> = {};
-    
-    let pointsCount = 30;
-    let isHourly = false;
-    
-    if (timeframe === "Today") {
-      pointsCount = 12; // 12 points (every 2 hours)
-      isHourly = true;
-    } else if (timeframe === "7d") {
-      pointsCount = 7;
-    } else {
-      pointsCount = 30;
-    }
-
-    if (isHourly) {
-      // Generate 12 hourly buckets for today
-      for (let i = 11; i >= 0; i--) {
-        const hour = new Date();
-        hour.setHours(hour.getHours() - i * 2);
-        const hourString = hour.toLocaleTimeString("en-US", { hour: "numeric", hour12: true });
-        const baseRev = Math.floor(Math.sin((12 - i) / 2) * 300) + 500;
-        dataMap[hourString] = { revenue: baseRev, ordersCount: Math.floor(baseRev / 400) };
-      }
-    } else {
-      // Generate daily buckets
-      for (let i = pointsCount - 1; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateString = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        const baseRev = Math.floor(Math.sin((pointsCount - i) / (pointsCount / 6 || 1)) * 500) + 1200;
-        dataMap[dateString] = { revenue: baseRev, ordersCount: Math.floor(baseRev / 400) };
-      }
-    }
-
-    // Populate actual orders matching selected granularity
-    orders.forEach((ord) => {
-      if (ord.createdAt) {
-        const d = new Date(ord.createdAt);
-        if (isHourly) {
-          // check if order is from today
-          const today = new Date();
-          if (d.toDateString() === today.toDateString()) {
-            // Find closest 2-hour bracket
-            const hour = d.getHours();
-            const bracket = Math.floor(hour / 2) * 2;
-            const bracketDate = new Date();
-            bracketDate.setHours(bracket, 0, 0, 0);
-            const keyString = bracketDate.toLocaleTimeString("en-US", { hour: "numeric", hour12: true });
-            if (dataMap[keyString]) {
-              dataMap[keyString].revenue += Number(ord.total) || 0;
-              dataMap[keyString].ordersCount += 1;
-            }
-          }
-        } else {
-          const dateString = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-          if (dataMap[dateString]) {
-            dataMap[dateString].revenue += Number(ord.total) || 0;
-            dataMap[dateString].ordersCount += 1;
-          }
-        }
-      }
-    });
-
-    // Convert map to sorted array
-    const dataList = Object.entries(dataMap).map(([date, val]) => ({
-      name: date,
-      Revenue: val.revenue,
-      Orders: val.ordersCount,
-    }));
-
-    return dataList;
-  }, [orders, timeframe]);
+    if (!dashboardData?.chartData) return [];
+    return dashboardData.chartData[timeframe] || [];
+  }, [dashboardData, timeframe]);
 
   const handleExport = () => {
     toast.success("Dashboard metrics exported successfully to CSV!");
@@ -227,6 +171,29 @@ export default function AdminDashboardOverviewClient() {
           </span>
         );
     }
+  };
+
+  const renderGrowth = (value: number, label: string = "vs last month") => {
+    const isPositive = value >= 0;
+    return (
+      <div className="mt-3 flex items-center gap-1.5">
+        <span className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+          isPositive 
+            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400" 
+            : "bg-red-50 text-red-700 dark:bg-red-950/20 dark:text-red-400"
+        }`}>
+          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
+            {isPositive ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 4.5l-15 15m0 0h11.25m-11.25 0V8.25" />
+            )}
+          </svg>
+          {isPositive ? `+${value.toFixed(1)}%` : `${value.toFixed(1)}%`}
+        </span>
+        <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">{label}</span>
+      </div>
+    );
   };
 
   return (
@@ -291,18 +258,13 @@ export default function AdminDashboardOverviewClient() {
           </div>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white leading-none">
-              ${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ৳{totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400">
-              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-              </svg>
-              +14%
-            </span>
-            <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">vs last month</span>
-          </div>
+          {renderGrowth(
+            currentStats?.revenueGrowth || 0,
+            timeframe === "Today" ? "vs yesterday" : timeframe === "7d" ? "vs last week" : "vs last month"
+          )}
         </div>
 
         {/* Metric 2: Total Orders */}
@@ -322,15 +284,10 @@ export default function AdminDashboardOverviewClient() {
               {totalOrders.toLocaleString()}
             </span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400">
-              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-              </svg>
-              +5%
-            </span>
-            <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">vs last month</span>
-          </div>
+          {renderGrowth(
+            currentStats?.ordersGrowth || 0,
+            timeframe === "Today" ? "vs yesterday" : timeframe === "7d" ? "vs last week" : "vs last month"
+          )}
         </div>
 
         {/* Metric 3: Active Products */}
@@ -350,15 +307,10 @@ export default function AdminDashboardOverviewClient() {
               {productsCount.toLocaleString()}
             </span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400">
-              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-              </svg>
-              +12%
-            </span>
-            <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">vs last month</span>
-          </div>
+          {renderGrowth(
+            currentStats?.productsGrowth || 0,
+            timeframe === "Today" ? "vs yesterday" : timeframe === "7d" ? "vs last week" : "vs last month"
+          )}
         </div>
 
         {/* Metric 4: Registered Customers */}
@@ -378,15 +330,10 @@ export default function AdminDashboardOverviewClient() {
               {usersCount.toLocaleString()}
             </span>
           </div>
-          <div className="mt-3 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400">
-              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-              </svg>
-              +8%
-            </span>
-            <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500">vs last week</span>
-          </div>
+          {renderGrowth(
+            currentStats?.usersGrowth || 0,
+            timeframe === "Today" ? "vs yesterday" : timeframe === "7d" ? "vs last week" : "vs last month"
+          )}
         </div>
       </div>
 
@@ -402,7 +349,7 @@ export default function AdminDashboardOverviewClient() {
             </p>
           </div>
           <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 bg-zinc-50 dark:bg-zinc-800 px-3 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800">
-            Daily average: ৳4,152
+            Daily average: ৳{(dashboardData?.dailyAverage || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
 
